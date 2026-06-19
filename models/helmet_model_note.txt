@@ -1,0 +1,26 @@
+Helmet Violation Detection model — weights NOT bundled in this repo.
+
+Framework: YOLOv11m
+Classes:   Plate, WithHelmet, WithoutHelmet
+
+Why it's missing
+----------------
+The original `helmet.pt` (~117 MB) was committed only as a Git LFS *pointer*;
+the actual LFS object was never uploaded, so cloning/pulling failed with:
+    "Object does not exist on the server: [404]"
+The broken pointer has been removed so clones/pulls work again.
+
+How to add the real weights
+---------------------------
+1. Copy your trained file to:  models/helmet.pt
+2. Commit it with working Git LFS:
+       git lfs install
+       git lfs track "*.pt"
+       git add .gitattributes models/helmet.pt
+       git commit -m "Add helmet detection weights"
+       git push
+   (Make sure `git lfs ls-files` lists models/helmet.pt before pushing, and
+   that the push uploads the LFS object — watch for the "Uploading LFS
+   objects" line.)
+3. Restart the app — the dashboard auto-detects it and the
+   "(model not loaded)" tag disappears.

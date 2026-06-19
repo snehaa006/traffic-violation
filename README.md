@@ -20,7 +20,7 @@ threshold, and get an annotated image plus a per-class detection summary.
 | # | Model | Framework | Weights | Classes |
 |---|-------|-----------|---------|---------|
 | 1 | License Plate Detection | YOLOv11n | `models/license.onnx` | License Plate |
-| 2 | Helmet Violation Detection | YOLOv11m | `models/helmet.pt` | Plate, WithHelmet, WithoutHelmet |
+| 2 | Helmet Violation Detection | YOLOv11m | `models/helmet.pt` *(add later)* | Plate, WithHelmet, WithoutHelmet |
 | 3 | Driver Monitoring System (DMS) | YOLOv8n | `models/driver.onnx` | Open Eye, Closed Eye, Cigarette, Phone, Seatbelt |
 | 4 | Illegal Parking Detection | YOLOv11m | `models/illegal_parking.pt` *(add later)* | Empty, Occupied |
 
@@ -44,9 +44,10 @@ traffic-violation/
 ├── .gitignore
 ├── models/                 # Model weights
 │   ├── license.onnx
-│   ├── helmet.pt
 │   ├── driver.onnx
-│   ├── illegal_parking.pt          # <- add this later (see link file)
+│   ├── helmet.pt                    # <- add this later (see helmet_model_note.txt)
+│   ├── helmet_model_note.txt
+│   ├── illegal_parking.pt           # <- add this later (see link file)
 │   └── illegal_parking_model_link.txt
 ├── configs/                # Class names per model (data.yaml style)
 │   ├── license.yaml
@@ -58,6 +59,13 @@ traffic-violation/
     ├── helmetviolation.ipynb
     └── illegal-parking-detection.ipynb
 ```
+
+### Adding the Helmet model later
+
+The original `helmet.pt` was committed as a broken Git LFS pointer (the 117 MB
+object was never uploaded), so it has been removed to keep clones/pulls working.
+Copy your trained `helmet.pt` into `models/` and commit it with working LFS —
+see `models/helmet_model_note.txt` for the exact commands.
 
 ### Adding the Illegal Parking model later
 
