@@ -1,0 +1,6 @@
+# Helmet Violation Detection — YOLOv11m
+nc: 3
+names:
+  - Plate
+  - WithHelmet
+  - WithoutHelmet

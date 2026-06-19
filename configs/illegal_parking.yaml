@@ -1,0 +1,7 @@
+# Illegal Parking Detection — YOLOv11m
+# Model weights not bundled yet. Download from the link in
+# models/illegal_parking_model_link.txt and save as models/illegal_parking.pt
+nc: 2
+names:
+  - Empty
+  - Occupied
