@@ -1,6 +1,6 @@
-gradio>=4.44.0
-# huggingface_hub 1.0 removed HfFolder, which Gradio 4.44 still imports.
-# Pin to the latest pre-1.0 release so the import works.
+gradio>=5.27.0
+# huggingface_hub 1.0 removed HfFolder; keep below it for safety with the
+# rest of the stack.
 huggingface_hub<1.0
 ultralytics>=8.3.0
 onnxruntime>=1.17.0
