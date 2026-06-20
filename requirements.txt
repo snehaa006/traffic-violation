@@ -1,4 +1,4 @@
-gradio>=5.27.0
+gradio==5.27.0
 # huggingface_hub 1.0 removed HfFolder; keep below it for safety with the
 # rest of the stack.
 huggingface_hub<1.0
@@ -6,7 +6,12 @@ ultralytics>=8.3.0
 onnxruntime>=1.17.0
 torch>=2.2.0
 torchvision>=0.17.0
-numpy>=1.26.0
+# TensorFlow 2.15 ships Keras 2.x, which loads the legacy .h5 vehicle
+# classifier (saved with keras 2.3) and runs on Python 3.11.
+tensorflow-cpu==2.15.0
+h5py>=3.10.0
+# Pin numpy < 2.0: TensorFlow 2.15 is not compatible with numpy 2.x.
+numpy>=1.26.0,<2.0
 pillow>=10.0.0
 pyyaml>=6.0
 opencv-python-headless>=4.9.0
