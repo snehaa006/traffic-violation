@@ -8,3 +8,6 @@ flagged/
 *.log
 .DS_Store
 .ipynb_checkpoints/
+
+# Auto-downloaded by Ultralytics at runtime
+yolo11m.pt

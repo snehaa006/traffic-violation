@@ -93,22 +93,25 @@ MODELS: list[dict] = [
     {
         "id": "illegalpark",
         "name": "Illegal Parking Detection",
-        "type": "detect",
-        "weights": MODELS_DIR / "illegalpark.pt",
+        "type": "parking",
+        "weights": MODELS_DIR / "illegalpark.pt",   # legal parking-spot detector
+        "vehicle_weights": "yolo11m.pt",             # COCO vehicle detector (auto-download)
         "config": None,
-        "framework": "YOLOv11m · COCO",
+        "framework": "Dual-YOLO · spots + vehicles",
         "short": "PARK",
         "color": (200, 0, 255),
         "details": (
-            "Locates **vehicles** (car, motorcycle, bus, truck, bicycle) so that "
-            "vehicles stopped or parked in restricted areas can be flagged. Built "
-            "on a COCO-pretrained YOLOv11m detector, with the output filtered down "
-            "to the vehicle classes that matter for parking enforcement.\n\n"
-            "**Reported classes:** `car` · `motorcycle` · `bus` · `truck` · "
-            "`bicycle`"
+            "**Dynamic parking-compliance enforcement** with two models. A "
+            "spot-detector (`illegalpark.pt`) maps the legal parking zones "
+            "(shaded green); a COCO vehicle detector (`yolo11m.pt`) finds cars, "
+            "motorcycles, buses and trucks. A vehicle is flagged as a "
+            "**violation** (red box) when its tyre-contact point falls outside "
+            "every legal zone, and **compliant** (green box) when it sits inside "
+            "one.\n\n"
+            "**Reports:** `Legal:<type>` · `Violation:<type>` for car · "
+            "motorcycle · bus · truck"
         ),
-        # COCO model: only surface vehicle classes for a parking use-case.
-        "keep": {"car", "motorcycle", "bus", "truck", "bicycle"},
+        "keep": None,
     },
     {
         "id": "stopwait",
@@ -205,6 +208,10 @@ def load_models() -> dict[str, dict]:
             if spec.get("type") == "classify":
                 entry["model"] = _load_classifier(spec["weights"])
                 entry["names"] = {i: n for i, n in enumerate(spec["labels"])}
+            elif spec.get("type") == "parking":
+                # Two YOLO models: legal-spot detector + COCO vehicle detector.
+                entry["model"] = YOLO(str(spec["weights"]))
+                entry["vehicle_model"] = YOLO(spec["vehicle_weights"])
             else:
                 model = YOLO(str(spec["weights"]))
                 entry["model"] = model
@@ -284,9 +291,73 @@ def _run_classifier(entry, img_rgb, conf, canvas, source, tag_model):
     return [[source, entry["name"], cname, round(p, 4), 0, 0, 0, 0]]
 
 
+# Parking-compliance settings (mirror the original dual-YOLO script).
+PARK_SPOT_CONF = 0.4
+PARK_VEHICLE_CONF = 0.35
+PARK_MARGIN = 15
+VEHICLE_CLASSES = {2: "Car", 3: "Motorcycle", 5: "Bus", 7: "Truck"}
+
+
+def _run_parking(entry, img_rgb, conf, canvas, source, tag_model):
+    """Dual-YOLO parking compliance: shade legal zones, judge each vehicle."""
+    spot_model = entry["model"]
+    vehicle_model = entry["vehicle_model"]
+    bgr = np.asarray(img_rgb)[..., ::-1]  # Ultralytics expects BGR for ndarrays
+    rows = []
+
+    spot_res = spot_model.predict(source=bgr, conf=PARK_SPOT_CONF, verbose=False)
+    sb = spot_res[0].boxes
+    legal_spots = (sb.xyxy.cpu().numpy() if sb is not None and len(sb)
+                   else np.empty((0, 4)))
+
+    # Shade the legal parking zones translucent green.
+    if len(legal_spots):
+        overlay = canvas.copy()
+        for sx1, sy1, sx2, sy2 in legal_spots:
+            cv2.rectangle(overlay, (int(sx1), int(sy1)), (int(sx2), int(sy2)),
+                          (0, 255, 0), -1)
+        cv2.addWeighted(overlay, 0.2, canvas, 0.8, 0, canvas)
+
+    veh_res = vehicle_model.predict(source=bgr, conf=PARK_VEHICLE_CONF,
+                                    verbose=False)
+    for v in veh_res[0].boxes:
+        cls_id = int(v.cls[0].item())
+        if cls_id not in VEHICLE_CLASSES:
+            continue
+        v_type = VEHICLE_CLASSES[cls_id]
+        p = float(v.conf[0].item())
+        vx1, vy1, vx2, vy2 = map(int, v.xyxy[0])
+        contact_x = (vx1 + vx2) // 2
+        contact_y = int(vy2 - (vy2 - vy1) * 0.1)
+        legal = any(
+            (sx1 - PARK_MARGIN < contact_x < sx2 + PARK_MARGIN)
+            and (sy1 - PARK_MARGIN < contact_y < sy2 + PARK_MARGIN)
+            for sx1, sy1, sx2, sy2 in legal_spots
+        )
+        if legal:
+            cv2.rectangle(canvas, (vx1, vy1), (vx2, vy2), (0, 255, 0), 2)
+            cv2.putText(canvas, v_type, (vx1, max(vy1 - 5, 12)), FONT, 0.5,
+                        (0, 255, 0), 2, cv2.LINE_AA)
+            status = f"Legal:{v_type}"
+        else:
+            cv2.rectangle(canvas, (vx1, vy1), (vx2, vy2), (255, 0, 0), 3)
+            label = f"VIOLATION: {v_type}"
+            (tw, th), _ = cv2.getTextSize(label, FONT, 0.6, 2)
+            cv2.rectangle(canvas, (vx1, vy1 - th - 10), (vx1 + tw, vy1),
+                          (255, 0, 0), -1)
+            cv2.putText(canvas, label, (vx1, vy1 - 5), FONT, 0.6,
+                        (255, 255, 255), 2, cv2.LINE_AA)
+            status = f"Violation:{v_type}"
+        rows.append([source, entry["name"], status, round(p, 4),
+                     vx1, vy1, vx2, vy2])
+    return rows
+
+
 def _run_one(entry, img_rgb, conf, canvas, source, tag_model):
     if entry.get("type") == "classify":
         return _run_classifier(entry, img_rgb, conf, canvas, source, tag_model)
+    if entry.get("type") == "parking":
+        return _run_parking(entry, img_rgb, conf, canvas, source, tag_model)
     return _run_detector(entry, img_rgb, conf, canvas, source, tag_model)
 
 
