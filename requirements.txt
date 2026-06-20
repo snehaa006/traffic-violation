@@ -1,6 +1,7 @@
-gradio>=5.27.0
-# huggingface_hub 1.0 removed HfFolder; keep below it for safety with the
-# rest of the stack.
+# Pin Gradio to match the Space sdk_version (5.27 has the Blocks(theme=...)
+# signature and fixes the 'bool is not iterable' startup bug).
+gradio==5.27.0
+# huggingface_hub 1.0 removed HfFolder; keep below it for safety.
 huggingface_hub<1.0
 ultralytics>=8.3.0
 onnxruntime>=1.17.0

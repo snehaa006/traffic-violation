@@ -18,12 +18,17 @@ threshold, and get an annotated image plus a per-class detection summary.
 
 ## Models
 
-| # | Model | Framework | Weights | Classes |
+| # | Model | Framework | Weights | Targets |
 |---|-------|-----------|---------|---------|
-| 1 | License Plate Detection | YOLOv11n | `models/license.onnx` | License Plate |
-| 2 | Helmet Violation Detection | YOLOv11m | `models/helmet.pt` *(add later)* | Plate, WithHelmet, WithoutHelmet |
-| 3 | Driver Monitoring System (DMS) | YOLOv8n | `models/driver.onnx` | Open Eye, Closed Eye, Cigarette, Phone, Seatbelt |
-| 4 | Illegal Parking Detection | YOLOv11m | `models/illegal_parking.pt` *(add later)* | Empty, Occupied |
+| 1 | Helmet Violation Detection | YOLOv11m | `models/helmet.pt` | Plate, WithHelmet, WithoutHelmet |
+| 2 | Driver Monitoring System (DMS) | YOLOv8n | `models/driver.onnx` | Open/Closed Eye, Cigarette, Phone, Seatbelt |
+| 3 | Illegal Parking Detection | YOLOv11m | `models/illegalpark.pt` | Vehicles (car, motorcycle, bus, truck, bicycle) |
+| 4 | Traffic Signal & Sign Violations | YOLOv8m | `models/stopwait.pt` | Red-light, Stop-line, Wrong-side, signs |
+
+The dashboard runs on **images and video** (frame-by-frame), with two tabs —
+**Run All Models** (one upload, combined overlay) and **Individual Models**
+(per-model section with details + its own upload). Every run produces an
+annotated result and a **downloadable CSV** of detections.
 
 All weights — `.pt` or `.onnx` — are loaded via Ultralytics `YOLO(...)`, so a
 single code path handles both formats. Class names are read from a per-model
