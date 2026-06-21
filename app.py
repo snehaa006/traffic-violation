@@ -29,8 +29,13 @@ from pathlib import Path
 import cv2
 import gradio as gr
 import numpy as np
+import pandas as pd
 import yaml
 from ultralytics import YOLO
+
+import matplotlib
+matplotlib.use("Agg")  # headless backend for Spaces
+import matplotlib.pyplot as plt
 
 # --------------------------------------------------------------------------- #
 # Configuration
@@ -76,9 +81,9 @@ MODELS: list[dict] = [
         "id": "driver",
         "name": "Driver Monitoring System (DMS)",
         "type": "detect",
-        "weights": MODELS_DIR / "driver.onnx",
-        "config": CONFIGS_DIR / "driver.yaml",
-        "framework": "YOLOv8n",
+        "weights": MODELS_DIR / "driver.pt",
+        "config": None,  # use the .pt's embedded class names
+        "framework": "YOLOv8",
         "short": "DMS",
         "color": (255, 120, 0),
         "details": (
@@ -440,26 +445,109 @@ def _summary(models, rows, is_video, processed=0):
     return "\n".join(lines)
 
 
+# Words that mark a detected class as an actual violation / risk event.
+VIOLATION_HINTS = ("violation", "without", "no-helmet", "nohelmet", "red",
+                   "wrong", "phone", "cigarette", "closed")
+CHART_COLORS = ["#22d3ee", "#818cf8", "#f472b6", "#34d399", "#fbbf24",
+                "#fb7185", "#a78bfa", "#60a5fa", "#f59e0b", "#2dd4bf"]
+
+
+def _is_violation(label: str) -> bool:
+    low = label.lower()
+    return any(h in low for h in VIOLATION_HINTS)
+
+
+def _analytics(rows, is_video, processed=0):
+    """Return (matplotlib Figure, insights-markdown) from detection rows."""
+    if not rows:
+        return None, "_Run a detection to see analytics here._"
+
+    df = pd.DataFrame(rows, columns=CSV_HEADERS)
+    df["confidence"] = df["confidence"].astype(float)
+    total = len(df)
+    avg_conf = df["confidence"].mean() * 100
+    top_class = df["class"].value_counts().idxmax()
+    busiest = df["model"].value_counts().idxmax()
+    violations = int(df["class"].map(_is_violation).sum())
+
+    plt.style.use("dark_background")
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.0))
+    fig.patch.set_alpha(0.0)
+    for ax in axes:
+        ax.set_facecolor("none")
+        ax.tick_params(colors="#cbd5e1", labelsize=8)
+        for s in ax.spines.values():
+            s.set_color("#475569")
+
+    # 1) detections per class (top 10)
+    cls_counts = df["class"].value_counts().head(10)[::-1]
+    axes[0].barh(cls_counts.index.astype(str), cls_counts.values,
+                 color=CHART_COLORS[0])
+    axes[0].set_title("Detections by class", color="#e2e8f0", fontsize=11)
+
+    # 2) detections per model
+    mdl_counts = df["model"].value_counts()
+    short = [m.split("(")[0].strip()[:14] for m in mdl_counts.index]
+    axes[1].bar(short, mdl_counts.values,
+                color=CHART_COLORS[1:1 + len(mdl_counts)])
+    axes[1].set_title("Detections by model", color="#e2e8f0", fontsize=11)
+    axes[1].tick_params(axis="x", rotation=30)
+
+    # 3) video -> per-frame trend; image -> confidence distribution
+    if is_video:
+        df["frame"] = (df["source"].str.replace("frame_", "", regex=False)
+                       .astype(int))
+        per_frame = df.groupby("frame").size()
+        axes[2].plot(per_frame.index, per_frame.values, color=CHART_COLORS[2],
+                     marker="o", ms=3)
+        axes[2].set_title("Detections per frame", color="#e2e8f0", fontsize=11)
+        axes[2].set_xlabel("frame", color="#cbd5e1", fontsize=8)
+    else:
+        axes[2].hist(df["confidence"] * 100, bins=10, color=CHART_COLORS[3])
+        axes[2].set_title("Confidence distribution", color="#e2e8f0",
+                          fontsize=11)
+        axes[2].set_xlabel("confidence %", color="#cbd5e1", fontsize=8)
+    fig.tight_layout()
+
+    scope = f"across **{processed}** frames" if is_video else "in this image"
+    md = (
+        "### 📈 Analytics\n"
+        f"- **Total detections:** {total} {scope}\n"
+        f"- **Likely violations / risk events:** {violations} "
+        f"({violations / total * 100:.0f}% of detections)\n"
+        f"- **Most frequent class:** {top_class}\n"
+        f"- **Busiest model:** {busiest}\n"
+        f"- **Average confidence:** {avg_conf:.1f}%"
+    )
+    return fig, md
+
+
 def make_handler(model_ids):
     loaded = [REGISTRY[m] for m in model_ids if REGISTRY[m]["loaded"]]
 
     def handler(image, video, conf):
         tag = "_".join(model_ids) + "_" + uuid.uuid4().hex[:6]
         if not loaded:
-            return None, None, "🔴 No models loaded for this section.", [], None
+            return (None, None, "🔴 No models loaded for this section.",
+                    [], None, "", None)
         if image is None and video is None:
-            return None, None, "⚠️ Upload an **image** or a **video** first.", [], None
+            return (None, None, "⚠️ Upload an **image** or a **video** first.",
+                    [], None, "", None)
 
         if image is not None:
             canvas, rows = _annotate_image(loaded, np.asarray(image), conf, "image")
             summary = _summary(loaded, rows, is_video=False)
             table = [[r[1], r[2], f"{r[3] * 100:.1f}%"] for r in rows]
-            return canvas, None, summary, table, _write_csv(rows, tag)
+            fig, insights = _analytics(rows, is_video=False)
+            return (canvas, None, summary, table, _write_csv(rows, tag),
+                    insights, fig)
 
         out_path, rows, processed = _process_video(loaded, video, conf)
         summary = _summary(loaded, rows, is_video=True, processed=processed)
         table = [[r[1], r[2], f"{r[3] * 100:.1f}%"] for r in rows]
-        return None, out_path, summary, table, _write_csv(rows, tag)
+        fig, insights = _analytics(rows, is_video=True, processed=processed)
+        return (None, out_path, summary, table, _write_csv(rows, tag),
+                insights, fig)
 
     return handler
 
@@ -472,52 +560,73 @@ THEME = gr.themes.Soft(
 )
 
 CSS = """
-.gradio-container { max-width: 1180px !important; }
-#hero { text-align:center; padding: 22px 0 6px; }
-#hero h1 { font-size: 2.05rem; margin-bottom: 4px; }
-#hero p { opacity: .82; margin-top: 0; font-size: 1.02rem; }
-#statusbar { text-align:center; margin: 2px 0 10px; }
+.gradio-container { max-width: 1200px !important; }
+#hero {
+  text-align:center; padding: 30px 18px 22px; margin-bottom: 6px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #0e7490 0%, #4338ca 100%);
+  color: #f8fafc;
+}
+#hero h1 { font-size: 2.2rem; margin: 0 0 6px; font-weight: 700; }
+#hero p { opacity: .92; margin: 0; font-size: 1.04rem; }
+#statusbar { text-align:center; margin: 10px 0 14px; opacity: .9; }
+.panel-card { border-radius: 14px; padding: 6px 4px; }
 .det-table table { font-size: 0.9rem; }
-.gr-accordion { border-radius: 10px; }
+.gr-accordion { border-radius: 12px; }
+button.primary, .primary button { font-weight: 600 !important; }
+footer { visibility: hidden; }
 """
 
 
 def build_panel(model_ids):
-    """Create the upload/inference widgets and wire the run button."""
+    """Create the upload/inference widgets, results tabs and run wiring."""
     with gr.Row():
-        with gr.Column(scale=1):
+        with gr.Column(scale=4, elem_classes=["panel-card"]):
+            gr.Markdown("#### 1 · Input")
             img_in = gr.Image(label="🖼️ Upload image", type="numpy", height=240)
             vid_in = gr.Video(label="🎬 …or upload video")
             conf = gr.Slider(0.1, 1.0, value=DEFAULT_CONF, step=0.05,
                              label="Confidence threshold")
-            btn = gr.Button("🔍 Run detection", variant="primary")
-        with gr.Column(scale=1):
-            img_out = gr.Image(label="Annotated result", height=300)
-            vid_out = gr.Video(label="Annotated video")
-            summary = gr.Markdown("Upload an image or video and click **Run**.")
-            table = gr.Dataframe(headers=["Model", "Class", "Confidence"],
-                                 datatype=["str", "str", "str"],
-                                 label="Detections", wrap=True,
-                                 elem_classes=["det-table"])
-            csv_out = gr.File(label="⬇️ Download detections (CSV)")
+            btn = gr.Button("🔍 Run detection", variant="primary", size="lg")
+        with gr.Column(scale=6, elem_classes=["panel-card"]):
+            gr.Markdown("#### 2 · Results")
+            with gr.Tabs():
+                with gr.Tab("🖼️ Annotated"):
+                    img_out = gr.Image(label="Annotated result", height=340)
+                    vid_out = gr.Video(label="Annotated video")
+                with gr.Tab("📊 Summary"):
+                    summary = gr.Markdown("Upload an image or video and click "
+                                          "**Run detection**.")
+                    table = gr.Dataframe(
+                        headers=["Model", "Class", "Confidence"],
+                        datatype=["str", "str", "str"],
+                        label="Detections", wrap=True,
+                        elem_classes=["det-table"])
+                with gr.Tab("📈 Analytics"):
+                    insights = gr.Markdown("_Run a detection to see analytics._")
+                    chart = gr.Plot(label="Detection analytics")
+                with gr.Tab("⬇️ Export"):
+                    csv_out = gr.File(label="Download detections (CSV)")
     btn.click(make_handler(model_ids), [img_in, vid_in, conf],
-              [img_out, vid_out, summary, table, csv_out])
+              [img_out, vid_out, summary, table, csv_out, insights, chart])
 
 
 with gr.Blocks(theme=THEME, css=CSS, title="Traffic Violation Detection") as demo:
     gr.HTML(
         "<div id='hero'><h1>🚦 Traffic Violation Detection</h1>"
-        "<p>Helmet, driver-monitoring, illegal-parking, signal/sign and "
-        "vehicle-type models on images &amp; video — powered by YOLOv8 / YOLOv11 "
-        "and a Keras CNN.</p></div>"
+        "<p>Helmet · Driver Monitoring · Illegal Parking · Signal &amp; Sign · "
+        "Vehicle Type — on images &amp; video, with analytics and CSV export. "
+        "Powered by YOLOv8 / YOLOv11 and a Keras CNN.</p></div>"
     )
 
     loaded_ids = [m["id"] for m in MODELS if REGISTRY[m["id"]]["loaded"]]
+    n_loaded = len(loaded_ids)
     status = " · ".join(
         f"{'🟢' if REGISTRY[m['id']]['loaded'] else '⚪'} {m['name']}"
         for m in MODELS
     )
-    gr.Markdown(f"<sub>{status}</sub>", elem_id="statusbar")
+    gr.Markdown(f"<div id='statusbar'><b>{n_loaded}/{len(MODELS)} models "
+                f"loaded</b> &nbsp;·&nbsp; {status}</div>")
 
     with gr.Tabs():
         # ---- Tab 1: all models together --------------------------------- #

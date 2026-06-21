@@ -15,6 +15,9 @@ numpy>=1.26.0,<2.0
 pillow>=10.0.0
 pyyaml>=6.0
 opencv-python-headless>=4.9.0
+# Analytics charts + tables (also pulled in by ultralytics, pinned for clarity).
+pandas>=2.0.0
+matplotlib>=3.7.0
 # Backport of the stdlib 'audioop' module (removed in Python 3.13) that
 # Gradio's pydub dependency imports. Only installed on 3.13+.
 audioop-lts; python_version >= "3.13"

@@ -1,8 +1,0 @@
-# Driver Monitoring System (DMS) — YOLOv8n
-nc: 5
-names:
-  - Open Eye
-  - Closed Eye
-  - Cigarette
-  - Phone
-  - Seatbelt
